@@ -1,0 +1,9 @@
+node_modules/
+.n8n/
+logs/
+uploads/
+outputs/jobs/
+outputs/noss_hyper_care_video/
+__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,66 @@
+{
+  "name": "Portal Video Generator V2.1",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerOn": "folder",
+        "path": "/Users/james/Document/Projects/CineCodex/uploads/committed",
+        "events": [
+          "add"
+        ],
+        "options": {
+          "awaitWriteFinish": true,
+          "ignoreInitial": true,
+          "depth": -1,
+          "usePolling": true
+        }
+      },
+      "id": "6d718ce2-b529-44af-bdd9-69017c070314",
+      "name": "Watch Committed Manifests",
+      "type": "n8n-nodes-base.localFileTrigger",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "executeOnce": false,
+        "command": "=scripts/run_manifest_from_n8n.sh \"{{$json.path}}\""
+      },
+      "id": "5d7f037a-9eda-48c3-8fc3-433a081356dc",
+      "name": "Run Video Job",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        520,
+        300
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Watch Committed Manifests": {
+      "main": [
+        [
+          {
+            "node": "Run Video Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "56c7c08a-7c07-4c1d-8f8f-61bb13a598cf",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "portal-video-generator-v2-1",
+  "tags": []
+}

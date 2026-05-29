@@ -1,0 +1,12 @@
+{
+  "name": "cinecodex",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "n8n": "scripts/start_n8n.sh",
+    "n8n:import": "scripts/import_n8n_workflow.sh"
+  },
+  "dependencies": {
+    "n8n": "^1.120.0"
+  }
+}
