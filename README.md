@@ -6,6 +6,7 @@ CineCodex converts uploaded PPT/PDF/image batches into a subtitle-burned MP4 thr
 
 - `Start CineCodex Portal.command` - double-click launcher for the portal.
 - `portal/` - FastAPI upload and generation UI.
+- `portal/v3_*.py` - V3 narration workspace modules for PPT extraction, subtitle import, LLM processing, and voice package export.
 - `scripts/start_portal.sh` - portal service entrypoint.
 - `scripts/start_n8n.sh` - n8n service entrypoint.
 - `scripts/import_n8n_workflow.sh` - imports the current V2.1 workflow.
@@ -41,6 +42,31 @@ n8n editor:
 ```text
 http://127.0.0.1:5678
 ```
+
+## V3 Narration Workspace
+
+V3 is available from the same portal service:
+
+```text
+http://127.0.0.1:8017/v3
+```
+
+The V3 workspace currently supports:
+
+- Uploading `.pptx` files and extracting slide thumbnails/text.
+- Auto-generating draft narration from PPT text.
+- Importing `.txt`, `.srt`, or `.vtt` subtitles and mapping them to slides.
+- Processing PPT context plus imported subtitles through a pluggable LLM provider.
+- Generating SRT exports and a voiceover ZIP package.
+
+The default LLM provider is `mock`, so the workflow runs locally without API keys. To use the OpenAI API provider, set:
+
+```bash
+export OPENAI_API_KEY="..."
+export CINECODEX_OPENAI_MODEL="gpt-4.1-mini"
+```
+
+The default V3 TTS engine is `silent` for safe local testing. Use `macOS Say` for local voice generation or `Edge TTS` when network TTS access is available.
 
 ## Input Limits
 
