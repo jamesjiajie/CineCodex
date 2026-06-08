@@ -5,7 +5,7 @@ import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Optional
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
@@ -161,7 +161,7 @@ def index() -> str:
     .drop.drag { border-color: var(--accent); background: #effaf8; }
     .muted { color: var(--muted); font-size: 13px; }
     input[type=file] { display: none; }
-    button, label.button {
+    button, label.button, a.button {
       appearance: none;
       border: 1px solid var(--line);
       background: #fff;
@@ -176,9 +176,10 @@ def index() -> str:
       font-size: 13px;
       cursor: pointer;
       white-space: nowrap;
+      text-decoration: none;
     }
-    button.primary { background: var(--accent); border-color: var(--accent); color: white; }
-    button.blue { background: var(--accent-2); border-color: var(--accent-2); color: white; }
+    button.primary, a.button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+    button.blue, a.button.blue { background: var(--accent-2); border-color: var(--accent-2); color: white; }
     button:disabled { opacity: .55; cursor: not-allowed; }
     .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
     table { width: 100%; border-collapse: collapse; }
@@ -246,7 +247,10 @@ def index() -> str:
 <body>
   <header>
     <h1>CineCodex Portal</h1>
-    <div class="muted" id="sessionLabel"></div>
+    <div class="toolbar">
+      <a class="button blue" href="/v3">Open V3 LLM Subtitle Workspace</a>
+      <div class="muted" id="sessionLabel"></div>
+    </div>
   </header>
   <main>
     <section>
@@ -580,6 +584,29 @@ def v3_index() -> str:
       font-size: 12px;
       overflow-wrap: anywhere;
     }
+    .control-group {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      display: grid;
+      gap: 10px;
+      background: #fbfcfd;
+    }
+    .group-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .check-row {
+      min-height: 32px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+    }
     @media (max-width: 1040px) {
       main { grid-template-columns: 1fr; }
       aside, section { border-right: 0; border-bottom: 1px solid var(--line); }
@@ -633,23 +660,44 @@ def v3_index() -> str:
         <button class="primary" id="saveSlideBtn">Save Slide</button>
       </div>
       <div class="body stack">
-        <label class="field">Mode
-          <select id="llmMode">
-            <option value="check">Check</option>
-            <option value="polish" selected>Polish</option>
-            <option value="rewrite">Rewrite</option>
-          </select>
-        </label>
-        <label class="field">LLM Provider
-          <select id="llmProvider">
-            <option value="mock" selected>Mock Local</option>
-            <option value="openai_api">OpenAI API</option>
-            <option value="mcp">MCP</option>
-          </select>
-        </label>
-        <div class="toolbar">
-          <button class="blue" id="autoBtn">Auto From PPT</button>
-          <button class="blue" id="llmBtn">AI Process</button>
+        <div class="control-group">
+          <div class="group-title">
+            <span>Subtitle Source</span>
+            <label class="button" for="subtitleFile">Upload File</label>
+          </div>
+          <label class="field">Paste Subtitle Text
+            <textarea id="pastedSubtitles" placeholder="Paste plain text, SRT, or VTT subtitles"></textarea>
+          </label>
+          <div class="toolbar">
+            <select id="pastedSubtitleFormat" style="width:112px;">
+              <option value=".txt" selected>Text</option>
+              <option value=".srt">SRT</option>
+              <option value=".vtt">VTT</option>
+            </select>
+            <button id="pasteSubtitleBtn">Use Pasted Text</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <div class="group-title">LLM Processing</div>
+          <label class="check-row"><input type="checkbox" id="useLlm" /> Call LLM after subtitle import</label>
+          <label class="field">Mode
+            <select id="llmMode">
+              <option value="check">Check</option>
+              <option value="polish" selected>Polish</option>
+              <option value="rewrite">Rewrite</option>
+            </select>
+          </label>
+          <label class="field">Provider
+            <select id="llmProvider">
+              <option value="mock" selected>Mock Local</option>
+              <option value="openai_api">OpenAI API</option>
+              <option value="mcp">MCP</option>
+            </select>
+          </label>
+          <div class="toolbar">
+            <button class="blue" id="autoBtn">Auto From PPT</button>
+            <button class="blue" id="llmBtn">Run LLM Now</button>
+          </div>
         </div>
         <label class="field">Narration
           <textarea id="narrationText"></textarea>
@@ -785,7 +833,35 @@ def v3_index() -> str:
       message('Importing subtitles...');
       currentProject = await api(`/api/v3/projects/${currentProject.project_id}/subtitles/import`, { method: 'POST', body: form });
       renderProject();
-      message('Subtitles imported and mapped', 'ok');
+      if ($('useLlm').checked) {
+        await llmProcess();
+        return;
+      }
+      message('Subtitle file imported and mapped', 'ok');
+    }
+
+    async function importPastedSubtitles() {
+      if (!currentProject) return;
+      const text = $('pastedSubtitles').value.trim();
+      if (!text) {
+        message('Paste subtitle text first', 'err');
+        return;
+      }
+      message('Importing pasted subtitles...');
+      currentProject = await api(`/api/v3/projects/${currentProject.project_id}/subtitles/paste`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          text,
+          format: $('pastedSubtitleFormat').value
+        })
+      });
+      renderProject();
+      if ($('useLlm').checked) {
+        await llmProcess();
+        return;
+      }
+      message('Pasted subtitles imported and mapped', 'ok');
     }
 
     async function autoNarration() {
@@ -850,6 +926,7 @@ def v3_index() -> str:
 
     $('pptFile').onchange = (e) => createProject(e.target.files[0]);
     $('subtitleFile').onchange = (e) => importSubtitles(e.target.files[0]);
+    $('pasteSubtitleBtn').onclick = () => importPastedSubtitles().catch(err => message(err.message, 'err'));
     $('extractBtn').onclick = () => extract().catch(err => message(err.message, 'err'));
     $('autoBtn').onclick = () => autoNarration().catch(err => message(err.message, 'err'));
     $('llmBtn').onclick = () => llmProcess().catch(err => message(err.message, 'err'));
@@ -893,6 +970,14 @@ def get_v3_project_or_404(project_id: str) -> dict:
         return read_project(project_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="V3 project not found") from exc
+
+
+def apply_v3_subtitle_import(project: dict, record: dict) -> dict:
+    project.setdefault("imports", []).append(record)
+    project["slides"] = v3_subtitles.map_items_to_slides(record["items"], project.get("slides", []))
+    project["status"] = "subtitles_imported"
+    save_project(project)
+    return public_project(project)
 
 
 @app.get("/api/v3/projects")
@@ -985,11 +1070,41 @@ async def api_v3_import_subtitles(project_id: str, file: Annotated[UploadFile, F
         "items": parsed["items"],
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
-    project.setdefault("imports", []).append(record)
-    project["slides"] = v3_subtitles.map_items_to_slides(record["items"], project.get("slides", []))
-    project["status"] = "subtitles_imported"
-    save_project(project)
-    return public_project(project)
+    return apply_v3_subtitle_import(project, record)
+
+
+@app.post("/api/v3/projects/{project_id}/subtitles/paste")
+def api_v3_paste_subtitles(project_id: str, payload: Annotated[dict, Body()]) -> dict:
+    project = get_v3_project_or_404(project_id)
+    if not project.get("slides"):
+        raise HTTPException(status_code=400, detail="Extract PPT slides before importing subtitles")
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Paste subtitle text first")
+    suffix = str(payload.get("format") or ".txt").strip().lower()
+    if suffix and not suffix.startswith("."):
+        suffix = "." + suffix
+    if suffix not in V3_SUBTITLE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported subtitle format: {suffix}")
+    try:
+        parsed = v3_subtitles.parse_subtitle_text(text, suffix)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    import_dir = v3_project_dir(project_id) / "imports"
+    import_dir.mkdir(parents=True, exist_ok=True)
+    target = import_dir / f"pasted-subtitles-{uuid.uuid4().hex[:8]}{suffix}"
+    target.write_text(text, encoding="utf-8")
+    record = {
+        "import_id": uuid.uuid4().hex[:12],
+        "filename": target.name,
+        "path": str(target),
+        "format": parsed["format"],
+        "mode": "timestamped" if parsed["format"] in {"srt", "vtt"} else "script",
+        "items": parsed["items"],
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    return apply_v3_subtitle_import(project, record)
 
 
 @app.post("/api/v3/projects/{project_id}/narration/auto")
@@ -1014,7 +1129,7 @@ def api_v3_auto_narration(project_id: str) -> dict:
 
 
 @app.post("/api/v3/projects/{project_id}/narration/llm")
-def api_v3_llm(project_id: str, options: Annotated[dict | None, Body()] = None) -> dict:
+def api_v3_llm(project_id: str, options: Annotated[Optional[dict], Body()] = None) -> dict:
     options = options or {}
     project = get_v3_project_or_404(project_id)
     if not project.get("slides"):
@@ -1092,7 +1207,7 @@ def api_v3_download_subtitles(project_id: str) -> FileResponse:
 
 
 @app.post("/api/v3/projects/{project_id}/voiceover")
-def api_v3_voiceover(project_id: str, options: Annotated[dict | None, Body()] = None) -> dict:
+def api_v3_voiceover(project_id: str, options: Annotated[Optional[dict], Body()] = None) -> dict:
     options = options or {}
     project = get_v3_project_or_404(project_id)
     if not project.get("slides"):

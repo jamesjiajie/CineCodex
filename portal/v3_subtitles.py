@@ -77,7 +77,11 @@ def parse_txt(text: str) -> list[dict[str, Any]]:
 
 def parse_subtitle_file(path: Path) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8-sig")
-    suffix = path.suffix.lower()
+    return parse_subtitle_text(text, path.suffix.lower())
+
+
+def parse_subtitle_text(text: str, suffix: str = ".txt") -> dict[str, Any]:
+    suffix = suffix.lower()
     if suffix == ".srt":
         items = parse_srt(text)
         fmt = "srt"

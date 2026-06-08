@@ -1,4 +1,6 @@
 node_modules/
+.venv/
+.codegraph/
 .n8n/
 logs/
 uploads/
