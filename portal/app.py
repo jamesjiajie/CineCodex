@@ -7,11 +7,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Optional
 
-from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
-from . import v3_llm, v3_ppt, v3_subtitles, v3_tts
+from . import v3_llm, v3_ppt, v3_subtitles, v3_tts, v4_video
 from .v3_projects import create_project as create_v3_project
+from .v3_projects import delete_project as delete_v3_project
 from .v3_projects import list_projects as list_v3_projects
 from .v3_projects import project_dir as v3_project_dir
 from .v3_projects import public_project, read_project, save_project, write_json as write_v3_json
@@ -87,7 +88,7 @@ def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/legacy", response_class=HTMLResponse)
 def index() -> str:
     return """
 <!doctype html>
@@ -426,6 +427,7 @@ def index() -> str:
 """
 
 
+@app.get("/", response_class=HTMLResponse)
 @app.get("/v3", response_class=HTMLResponse)
 def v3_index() -> str:
     return """
@@ -434,7 +436,7 @@ def v3_index() -> str:
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CineCodex V3</title>
+  <title>CineCodex V4</title>
   <style>
     :root {
       color-scheme: light;
@@ -538,6 +540,20 @@ def v3_index() -> str:
       background: #fff;
       cursor: pointer;
     }
+    .project-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: start;
+      gap: 8px;
+    }
+    .project-delete {
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      color: var(--danger);
+      font-size: 18px;
+      line-height: 1;
+    }
     .slide-item.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
     .thumb {
       width: 100%;
@@ -607,6 +623,24 @@ def v3_index() -> str:
       gap: 8px;
       font-size: 13px;
     }
+    .progress {
+      height: 8px;
+      border-radius: 999px;
+      background: #e5eaf1;
+      overflow: hidden;
+    }
+    .bar {
+      width: 0;
+      height: 100%;
+      background: var(--accent);
+      transition: width .25s ease;
+    }
+    video {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #111827;
+    }
     @media (max-width: 1040px) {
       main { grid-template-columns: 1fr; }
       aside, section { border-right: 0; border-bottom: 1px solid var(--line); }
@@ -616,9 +650,9 @@ def v3_index() -> str:
 </head>
 <body>
   <header>
-    <h1>CineCodex V3</h1>
+    <h1>CineCodex V4</h1>
     <div class="toolbar">
-      <a class="button" href="/">V2.1</a>
+      <a class="button" href="/legacy">Legacy V2.1</a>
       <button id="refreshBtn">Refresh</button>
     </div>
   </header>
@@ -633,7 +667,7 @@ def v3_index() -> str:
         <div class="drop" id="drop">
           <div>
             <div style="font-weight:650;margin-bottom:5px;">Drop PPTX</div>
-            <div class="muted">V3 extracts slides first</div>
+            <div class="muted">Upload once, then finish subtitles and video here</div>
           </div>
         </div>
         <div class="slide-list" id="projectList"></div>
@@ -650,7 +684,7 @@ def v3_index() -> str:
       </div>
       <input id="subtitleFile" type="file" accept=".txt,.srt,.vtt" />
       <div id="previewBody" class="stack">
-        <div class="body muted">Create or select a V3 project.</div>
+        <div class="body muted">Create or select a video project.</div>
       </div>
     </section>
 
@@ -679,6 +713,15 @@ def v3_index() -> str:
         </div>
         <div class="control-group">
           <div class="group-title">LLM Processing</div>
+          <label class="field">Language
+            <select id="language">
+              <option value="yue-HK" selected>Cantonese 粤语</option>
+              <option value="zh-CN">Mandarin 普通话</option>
+            </select>
+          </label>
+          <label class="field">Voice
+            <select id="voice"></select>
+          </label>
           <label class="check-row"><input type="checkbox" id="useLlm" /> Call LLM after subtitle import</label>
           <label class="field">Mode
             <select id="llmMode">
@@ -710,12 +753,21 @@ def v3_index() -> str:
         </label>
         <div class="toolbar">
           <select id="ttsEngine" style="width:128px;">
-            <option value="silent" selected>Silent</option>
-            <option value="say">macOS Say</option>
+            <option value="say" selected>macOS Say</option>
             <option value="edge">Edge TTS</option>
+            <option value="silent">Silent</option>
           </select>
           <button id="voiceBtn">Generate Voice</button>
           <button id="srtBtn">Export SRT</button>
+        </div>
+        <div class="control-group">
+          <div class="group-title">Final Video</div>
+          <label class="check-row"><input type="checkbox" id="burnSubtitles" checked /> Burn subtitles into video</label>
+          <button class="primary" id="videoBtn">Generate Video</button>
+          <div class="progress"><div class="bar" id="videoBar"></div></div>
+          <div id="videoMessage" class="muted">Ready to generate after subtitle review</div>
+          <video id="videoPreview" controls style="display:none;"></video>
+          <a class="button blue" id="videoDownload" style="display:none;" download>Download MP4</a>
         </div>
         <div id="message" class="muted">Ready</div>
         <div class="path" id="exportPath" style="display:none;"></div>
@@ -726,7 +778,68 @@ def v3_index() -> str:
   <script>
     let currentProject = null;
     let currentSlide = 0;
+    let currentVideoJob = null;
+    let videoPollTimer = null;
     const $ = (id) => document.getElementById(id);
+    const edgeVoiceOptions = {
+      'yue-HK': [
+        { value: 'zh-HK-HiuMaanNeural', label: 'HiuMaan · Female' },
+        { value: 'zh-HK-HiuGaaiNeural', label: 'HiuGaai · Female' },
+        { value: 'zh-HK-WanLungNeural', label: 'WanLung · Male' }
+      ],
+      'zh-CN': [
+        { value: 'zh-CN-XiaoxiaoNeural', label: 'Xiaoxiao · Female' },
+        { value: 'zh-CN-YunxiNeural', label: 'Yunxi · Male' },
+        { value: 'zh-CN-YunjianNeural', label: 'Yunjian · Male' }
+      ]
+    };
+
+    function sayVoiceForLanguage(language) {
+      return language === 'yue-HK' ? 'Sinji' : 'Tingting';
+    }
+
+    function renderVoiceOptions(selectedVoice) {
+      const language = $('language').value;
+      const engine = $('ttsEngine').value;
+      let options = [];
+      if (engine === 'say') {
+        options = language === 'yue-HK'
+          ? [{ value: 'Sinji', label: 'Sinji · Cantonese' }]
+          : [{ value: 'Tingting', label: 'Tingting · Mandarin' }];
+      } else if (engine === 'edge') {
+        options = edgeVoiceOptions[language] || edgeVoiceOptions['yue-HK'];
+      } else {
+        options = [{ value: '', label: 'No voice · Silent audio' }];
+      }
+      $('voice').innerHTML = options.map(option =>
+        `<option value="${option.value}">${option.label}</option>`
+      ).join('');
+      $('voice').disabled = engine === 'silent';
+      if (selectedVoice && options.some(option => option.value === selectedVoice)) {
+        $('voice').value = selectedVoice;
+      }
+    }
+
+    function selectedVoiceSettings() {
+      const language = $('language').value;
+      const engine = $('ttsEngine').value;
+      const defaultEdgeVoice = edgeVoiceOptions[language][0].value;
+      return {
+        language,
+        tts_engine: engine,
+        voice: engine === 'edge' ? $('voice').value : defaultEdgeVoice,
+        say_voice: engine === 'say' ? $('voice').value : sayVoiceForLanguage(language)
+      };
+    }
+
+    async function saveProjectSettings() {
+      if (!currentProject) return;
+      currentProject = await api(`/api/v3/projects/${currentProject.project_id}/settings`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(selectedVoiceSettings())
+      });
+    }
 
     async function api(path, options) {
       const res = await fetch(path, options);
@@ -747,20 +860,58 @@ def v3_index() -> str:
     async function refreshProjects() {
       const data = await api('/api/v3/projects');
       $('projectList').innerHTML = data.projects.map(p => `
-        <div class="slide-item" data-project="${p.project_id}">
-          <div style="font-weight:650;font-size:13px;">${p.project_id}</div>
-          <div class="muted">${p.slide_count} slides · ${p.status || 'created'}</div>
+        <div class="slide-item project-row" data-project="${p.project_id}">
+          <div>
+            <div style="font-weight:650;font-size:13px;overflow-wrap:anywhere;">${p.project_id}</div>
+            <div class="muted">${p.slide_count} slides · ${p.status || 'created'}</div>
+          </div>
+          <button class="project-delete" data-delete-project="${p.project_id}" title="Delete project" aria-label="Delete project">×</button>
         </div>`).join('') || '<div class="muted">No V3 projects yet</div>';
       document.querySelectorAll('[data-project]').forEach(el => {
-        el.onclick = () => loadProject(el.dataset.project);
+        el.onclick = (event) => {
+          if (event.target.closest('[data-delete-project]')) return;
+          loadProject(el.dataset.project);
+        };
       });
+      document.querySelectorAll('[data-delete-project]').forEach(button => {
+        button.onclick = (event) => {
+          event.stopPropagation();
+          deleteProject(button.dataset.deleteProject).catch(err => message(err.message, 'err'));
+        };
+      });
+    }
+
+    async function deleteProject(projectId) {
+      if (!confirm(`Delete project "${projectId}"? This cannot be undone.`)) return;
+      await api(`/api/v3/projects/${projectId}`, { method: 'DELETE' });
+      if (currentProject && currentProject.project_id === projectId) {
+        currentProject = null;
+        currentSlide = 0;
+        currentVideoJob = null;
+        if (videoPollTimer) clearInterval(videoPollTimer);
+        $('projectTitle').textContent = 'No project selected';
+        $('previewBody').innerHTML = '<div class="body muted">Create or select a video project.</div>';
+        clearEditor();
+        $('videoBar').style.width = '0%';
+        $('videoMessage').textContent = 'Ready to generate after subtitle review';
+        $('videoMessage').className = 'muted';
+        $('videoPreview').removeAttribute('src');
+        $('videoPreview').style.display = 'none';
+        $('videoDownload').style.display = 'none';
+      }
+      await refreshProjects();
+      message('Project deleted', 'ok');
     }
 
     async function createProject(file) {
       if (!file) return;
       const form = new FormData();
       form.append('file', file);
-      form.append('language', 'zh-CN');
+      const voiceSettings = selectedVoiceSettings();
+      form.append('language', voiceSettings.language);
+      form.append('voice', voiceSettings.voice);
+      form.append('say_voice', voiceSettings.say_voice);
+      form.append('tts_engine', voiceSettings.tts_engine);
       form.append('llm_provider', $('llmProvider').value);
       message('Creating project...');
       currentProject = await api('/api/v3/projects', { method: 'POST', body: form });
@@ -773,6 +924,10 @@ def v3_index() -> str:
     async function loadProject(id) {
       currentProject = await api(`/api/v3/projects/${id}`);
       currentSlide = 0;
+      const settings = currentProject.settings || {};
+      $('language').value = settings.language === 'zh-CN' ? 'zh-CN' : 'yue-HK';
+      $('ttsEngine').value = settings.tts_engine || 'say';
+      renderVoiceOptions($('ttsEngine').value === 'say' ? settings.say_voice : settings.voice);
       renderProject();
       message('Project loaded', 'ok');
     }
@@ -866,6 +1021,7 @@ def v3_index() -> str:
 
     async function autoNarration() {
       if (!currentProject) return;
+      await saveProjectSettings();
       message('Generating draft narration...');
       currentProject = await api(`/api/v3/projects/${currentProject.project_id}/narration/auto`, { method: 'POST' });
       renderProject();
@@ -874,6 +1030,7 @@ def v3_index() -> str:
 
     async function llmProcess() {
       if (!currentProject) return;
+      await saveProjectSettings();
       message('Processing with LLM provider...');
       currentProject = await api(`/api/v3/projects/${currentProject.project_id}/narration/llm`, {
         method: 'POST',
@@ -903,17 +1060,66 @@ def v3_index() -> str:
     async function generateVoice() {
       if (!currentProject) return;
       await saveSlide();
+      await saveProjectSettings();
       message('Generating voice package...');
       const result = await api(`/api/v3/projects/${currentProject.project_id}/voiceover`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ tts_engine: $('ttsEngine').value })
+        body: JSON.stringify(selectedVoiceSettings())
       });
       currentProject = result.project;
       $('exportPath').style.display = 'block';
       $('exportPath').textContent = result.export.zip;
       renderProject();
       message('Voice package generated', 'ok');
+    }
+
+    async function generateVideo() {
+      if (!currentProject) return;
+      if (!(currentProject.slides || []).length) {
+        message('Extract PPT slides first', 'err');
+        return;
+      }
+      await saveSlide();
+      await saveProjectSettings();
+      $('videoBtn').disabled = true;
+      $('videoPreview').style.display = 'none';
+      $('videoDownload').style.display = 'none';
+      $('videoBar').style.width = '1%';
+      $('videoMessage').textContent = 'Queuing video generation...';
+      const result = await api(`/api/v4/projects/${currentProject.project_id}/video`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          ...selectedVoiceSettings(),
+          subtitles: $('burnSubtitles').checked
+        })
+      });
+      currentVideoJob = result.job_id;
+      if (videoPollTimer) clearInterval(videoPollTimer);
+      videoPollTimer = setInterval(pollVideoStatus, 1200);
+      await pollVideoStatus();
+    }
+
+    async function pollVideoStatus() {
+      if (!currentVideoJob) return;
+      const status = await api(`/api/jobs/${currentVideoJob}/status`);
+      $('videoBar').style.width = `${status.progress || 0}%`;
+      $('videoMessage').textContent = status.message || status.status;
+      if (status.status === 'success') {
+        clearInterval(videoPollTimer);
+        $('videoBtn').disabled = false;
+        const videoUrl = `/api/jobs/${currentVideoJob}/video`;
+        $('videoPreview').src = videoUrl;
+        $('videoPreview').style.display = 'block';
+        $('videoDownload').href = videoUrl;
+        $('videoDownload').style.display = 'inline-flex';
+      }
+      if (status.status === 'failed') {
+        clearInterval(videoPollTimer);
+        $('videoBtn').disabled = false;
+        $('videoMessage').className = 'err';
+      }
     }
 
     async function exportSrt() {
@@ -925,6 +1131,15 @@ def v3_index() -> str:
     }
 
     $('pptFile').onchange = (e) => createProject(e.target.files[0]);
+    $('language').onchange = () => {
+      renderVoiceOptions();
+      saveProjectSettings().catch(err => message(err.message, 'err'));
+    };
+    $('ttsEngine').onchange = () => {
+      renderVoiceOptions();
+      saveProjectSettings().catch(err => message(err.message, 'err'));
+    };
+    $('voice').onchange = () => saveProjectSettings().catch(err => message(err.message, 'err'));
     $('subtitleFile').onchange = (e) => importSubtitles(e.target.files[0]);
     $('pasteSubtitleBtn').onclick = () => importPastedSubtitles().catch(err => message(err.message, 'err'));
     $('extractBtn').onclick = () => extract().catch(err => message(err.message, 'err'));
@@ -933,11 +1148,17 @@ def v3_index() -> str:
     $('saveSlideBtn').onclick = () => saveSlide().catch(err => message(err.message, 'err'));
     $('voiceBtn').onclick = () => generateVoice().catch(err => message(err.message, 'err'));
     $('srtBtn').onclick = () => exportSrt().catch(err => message(err.message, 'err'));
+    $('videoBtn').onclick = () => generateVideo().catch(err => {
+      $('videoBtn').disabled = false;
+      $('videoMessage').textContent = err.message;
+      $('videoMessage').className = 'err';
+    });
     $('refreshBtn').onclick = refreshProjects;
     const drop = $('drop');
     drop.ondragover = (e) => { e.preventDefault(); drop.style.borderColor = 'var(--accent)'; };
     drop.ondragleave = () => { drop.style.borderColor = '#9aa4b2'; };
     drop.ondrop = (e) => { e.preventDefault(); drop.style.borderColor = '#9aa4b2'; createProject(e.dataTransfer.files[0]).catch(err => message(err.message, 'err')); };
+    renderVoiceOptions();
     refreshProjects().catch(err => message(err.message, 'err'));
   </script>
 </body>
@@ -988,8 +1209,10 @@ def api_v3_projects() -> dict:
 @app.post("/api/v3/projects")
 async def api_v3_create_project(
     file: Annotated[UploadFile, File()],
-    language: Annotated[str, Form()] = "zh-CN",
-    voice: Annotated[str, Form()] = "zh-CN-XiaoxiaoNeural",
+    language: Annotated[str, Form()] = "yue-HK",
+    voice: Annotated[str, Form()] = "zh-HK-HiuMaanNeural",
+    say_voice: Annotated[str, Form()] = "Sinji",
+    tts_engine: Annotated[str, Form()] = "say",
     tone: Annotated[str, Form()] = "professional",
     llm_provider: Annotated[str, Form()] = "mock",
 ) -> dict:
@@ -1005,6 +1228,8 @@ async def api_v3_create_project(
         {
             "language": language,
             "voice": voice,
+            "say_voice": say_voice,
+            "tts_engine": tts_engine,
             "tone": tone,
             "llm_provider": llm_provider,
         },
@@ -1016,6 +1241,24 @@ async def api_v3_create_project(
 @app.get("/api/v3/projects/{project_id}")
 def api_v3_get_project(project_id: str) -> dict:
     return public_project(get_v3_project_or_404(project_id))
+
+
+@app.patch("/api/v3/projects/{project_id}/settings")
+def api_v3_update_settings(project_id: str, payload: Annotated[dict, Body()]) -> dict:
+    project = get_v3_project_or_404(project_id)
+    settings = project.setdefault("settings", {})
+    for key in ("language", "voice", "say_voice", "tts_engine"):
+        if key in payload:
+            settings[key] = str(payload[key])
+    save_project(project)
+    return public_project(project)
+
+
+@app.delete("/api/v3/projects/{project_id}")
+def api_v3_delete_project(project_id: str) -> dict:
+    if not delete_v3_project(project_id):
+        raise HTTPException(status_code=404, detail="V3 project not found")
+    return {"deleted": project_id}
 
 
 @app.post("/api/v3/projects/{project_id}/extract")
@@ -1112,10 +1355,15 @@ def api_v3_auto_narration(project_id: str) -> dict:
     project = get_v3_project_or_404(project_id)
     if not project.get("slides"):
         raise HTTPException(status_code=400, detail="Extract PPT slides first")
+    language = project.get("settings", {}).get("language", "yue-HK")
     for slide in project["slides"]:
         extracted = slide.get("extracted") or {}
         raw = extracted.get("raw_text") or extracted.get("title") or f"Slide {slide['slide_number']}"
-        text = "这一页说明：" + "；".join([part for part in raw.splitlines() if part][:3]) + "。"
+        points = "；".join([part for part in raw.splitlines() if part][:3])
+        if language == "yue-HK":
+            text = f"呢一頁主要講：{points}。我哋可以逐步睇清楚當中嘅重點。"
+        else:
+            text = f"这一页主要说明：{points}。我们可以逐步了解其中的重点。"
         slide["narration"] = {
             "source": "auto",
             "text": text,
@@ -1232,6 +1480,50 @@ def api_v3_download_voiceover(project_id: str) -> FileResponse:
     if not path.exists():
         raise HTTPException(status_code=404, detail="Voiceover package not found")
     return FileResponse(path, media_type="application/zip", filename=path.name)
+
+
+@app.post("/api/v4/projects/{project_id}/video")
+def api_v4_generate_video(
+    project_id: str,
+    background_tasks: BackgroundTasks,
+    options: Annotated[Optional[dict], Body()] = None,
+) -> dict:
+    project = get_v3_project_or_404(project_id)
+    if not project.get("slides"):
+        raise HTTPException(status_code=400, detail="Extract PPT slides before generating video")
+    missing = [
+        str(slide.get("slide_number"))
+        for slide in project["slides"]
+        if not str((slide.get("narration") or {}).get("subtitle") or (slide.get("narration") or {}).get("text") or "").strip()
+    ]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Slides without subtitles: {', '.join(missing)}")
+
+    job = v4_video.create_video_job(project)
+    project.setdefault("exports", []).append(
+        {
+            "type": "video_job",
+            "job_id": job["job_id"],
+            "job_dir": job["job_dir"],
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+    project["status"] = "video_queued"
+    save_project(project)
+    background_tasks.add_task(v4_video.generate_project_video, project, job["job_id"], options or {})
+    return job
+
+
+@app.get("/api/jobs/{job_id}/video")
+def api_download_video(job_id: str) -> FileResponse:
+    status_path = JOBS / Path(job_id).name / "status.json"
+    if not status_path.exists():
+        raise HTTPException(status_code=404, detail="Video job not found")
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    path = Path(status.get("final_video") or "")
+    if status.get("status") != "success" or not path.exists():
+        raise HTTPException(status_code=404, detail="Generated video is not ready")
+    return FileResponse(path, media_type="video/mp4", filename=path.name)
 
 
 @app.post("/api/sessions")

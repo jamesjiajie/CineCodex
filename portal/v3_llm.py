@@ -41,20 +41,28 @@ def build_payload(project: dict[str, Any], mode: str) -> dict[str, Any]:
     }
 
 
-def _polish_text(text: str, mode: str, title: str, raw_text: str) -> str:
+def _polish_text(text: str, mode: str, title: str, raw_text: str, language: str) -> str:
     text = " ".join(text.split()).strip()
     if mode == "check":
         return text
+    cantonese = language == "yue-HK"
     if mode == "rewrite":
         source = raw_text or title or text
-        return f"这一页的重点是{source}。请结合画面内容，按这个逻辑向观众说明关键结论。"
+        if cantonese:
+            return f"呢一頁嘅重點係{source}。請配合畫面內容，用自然嘅粵語向觀眾講清楚關鍵結論。"
+        return f"这一页的重点是{source}。请结合画面内容，向观众说明关键结论。"
     if text:
-        return f"{text} 这部分可以用更自然的讲解节奏说明，让观众先理解背景，再抓住重点。"
+        if cantonese:
+            return f"{text} 呢部分可以用自然啲嘅講解節奏，等觀眾先明白背景，再掌握重點。"
+        return f"{text} 这部分可以用更自然的讲解节奏，让观众先理解背景，再抓住重点。"
+    if cantonese:
+        return f"呢一頁介紹{title}，建議用簡潔嘅粵語旁白講清楚核心信息。"
     return f"这一页介绍{title}，建议用简洁的旁白说明核心信息。"
 
 
 def mock_process(project: dict[str, Any], mode: str) -> dict[str, Any]:
     slides = []
+    language = project.get("settings", {}).get("language", "yue-HK")
     imported = [
         item
         for import_record in project.get("imports", [])
@@ -65,7 +73,7 @@ def mock_process(project: dict[str, Any], mode: str) -> dict[str, Any]:
         narration = slide.get("narration") or {}
         imported_text = imported[index]["text"] if index < len(imported) else ""
         base = imported_text or narration.get("text") or extracted.get("raw_text") or extracted.get("title") or ""
-        text = _polish_text(base, mode, extracted.get("title", ""), extracted.get("raw_text", ""))
+        text = _polish_text(base, mode, extracted.get("title", ""), extracted.get("raw_text", ""), language)
         duration = max(4.0, min(45.0, len(text) / 7))
         warnings = []
         if imported_text and extracted.get("raw_text") and not any(token in extracted["raw_text"] for token in imported_text[:12].split()):

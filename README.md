@@ -43,21 +43,28 @@ n8n editor:
 http://127.0.0.1:5678
 ```
 
-## V3 Narration Workspace
+## V4 Unified Workspace
 
-V3 is available from the same portal service:
+The default portal page is now the unified V4 workflow:
 
 ```text
-http://127.0.0.1:8017/v3
+http://127.0.0.1:8017/
 ```
 
-The V3 workspace currently supports:
+The workspace supports:
 
 - Uploading `.pptx` files and extracting slide thumbnails/text.
 - Auto-generating draft narration from PPT text.
 - Importing `.txt`, `.srt`, or `.vtt` subtitles and mapping them to slides.
 - Processing PPT context plus imported subtitles through a pluggable LLM provider.
-- Generating SRT exports and a voiceover ZIP package.
+- Reviewing narration, subtitles, and per-slide duration.
+- Generating SRT exports, a voiceover ZIP package, or a final subtitle-burned MP4.
+
+The previous V2.1 upload-and-generate page remains available at:
+
+```text
+http://127.0.0.1:8017/legacy
+```
 
 The default LLM provider is `mock`, so the workflow runs locally without API keys. To use the OpenAI API provider, set:
 

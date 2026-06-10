@@ -5,6 +5,7 @@ node_modules/
 logs/
 uploads/
 outputs/jobs/
+outputs/v3_projects/
 outputs/noss_hyper_care_video/
 __pycache__/
 *.pyc

@@ -53,7 +53,7 @@ def _say(text: str, voice: str, rate: str, output: Path) -> None:
 def generate_voice_package(project: dict[str, Any], project_dir: Path, options: dict[str, Any] | None = None) -> dict[str, Any]:
     options = options or {}
     settings = {**project.get("settings", {}), **options}
-    engine = settings.get("tts_engine", "silent")
+    engine = settings.get("tts_engine", "say")
     voice = settings.get("voice", "zh-CN-XiaoxiaoNeural")
     rate = settings.get("rate", "+0%")
     audio_dir = project_dir / "exports" / "voiceover"
@@ -77,7 +77,8 @@ def generate_voice_package(project: dict[str, Any], project_dir: Path, options: 
         if engine == "edge":
             asyncio.run(_edge(text, voice, rate, output))
         elif engine == "say":
-            _say(text, settings.get("say_voice", "Tingting"), str(settings.get("say_rate", "175")), output)
+            default_say_voice = "Sinji" if settings.get("language") == "yue-HK" else "Tingting"
+            _say(text, settings.get("say_voice", default_say_voice), str(settings.get("say_rate", "175")), output)
         else:
             _silent(duration, output)
         slide["voiceover"] = {"status": "generated", "audio_path": str(output)}

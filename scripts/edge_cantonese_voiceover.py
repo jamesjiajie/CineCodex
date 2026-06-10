@@ -194,6 +194,7 @@ def main() -> int:
     for slide in slides:
         slide_no = int(slide["slide"])
         text = slide["text"]
+        slide_minimum_seconds = float(slide.get("duration_seconds", minimum_seconds_per_slide))
         raw_audio = audio_dir / f"slide_{slide_no:02d}.mp3"
         if args.tts_engine == "say":
             raw_audio = audio_dir / f"slide_{slide_no:02d}.aiff"
@@ -201,7 +202,7 @@ def main() -> int:
 
         if args.tts_engine == "silent":
             print(f"Creating silent audio for slide {slide_no}...")
-            duration = minimum_seconds_per_slide
+            duration = slide_minimum_seconds
             durations.append(duration)
             create_silence(args.ffmpeg, duration, padded_wav)
             padded_files.append(padded_wav)
@@ -218,7 +219,7 @@ def main() -> int:
                 asyncio.run(synthesize(text, args.voice, args.rate, raw_audio))
 
         raw_duration = ffprobe_duration(args.ffprobe, raw_audio)
-        duration = max(minimum_seconds_per_slide, raw_duration + args.tail_pad)
+        duration = max(slide_minimum_seconds, raw_duration + args.tail_pad)
         durations.append(duration)
         if raw_duration <= 0:
             print(f"Audio for slide {slide_no} was empty; using silence.")

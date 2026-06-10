@@ -66,12 +66,13 @@ def create_project(source: Path, settings: dict[str, Any] | None = None) -> dict
         "created_at": now(),
         "updated_at": now(),
         "settings": {
-            "language": "zh-CN",
-            "voice": "zh-CN-XiaoxiaoNeural",
+            "language": "yue-HK",
+            "voice": "zh-HK-HiuMaanNeural",
+            "say_voice": "Sinji",
             "tone": "professional",
             "target_duration_seconds": 240,
             "llm_provider": "mock",
-            "tts_engine": "silent",
+            "tts_engine": "say",
             **(settings or {}),
         },
         "slides": [],
@@ -104,6 +105,14 @@ def list_projects() -> list[dict[str, Any]]:
             }
         )
     return projects
+
+
+def delete_project(project_id: str) -> bool:
+    path = project_dir(project_id)
+    if not path.exists():
+        return False
+    shutil.rmtree(path)
+    return True
 
 
 def public_project(project: dict[str, Any]) -> dict[str, Any]:
